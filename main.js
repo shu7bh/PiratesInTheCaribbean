@@ -1,6 +1,4 @@
 import './style.css'
-
-
 import * as THREE from 'three';
 
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
@@ -26,22 +24,27 @@ class Boat
         {
             scene.add( gltf.scene )
             gltf.scene.scale.set(3, 3, 3)
-            gltf.scene.position.set(5,13,50)
-            gltf.scene.rotation.y = 1.5
+            // randomly generate position
+            gltf.scene.position.x = random(-1000, 1000)
+            gltf.scene.position.z = random(-1000, 1000)
+            gltf.scene.position.y = 13
+            gltf.scene.rotation.y = 2
 
             this.boat = gltf.scene
             this.speed =
             {
                 vel: 0,
-                rot: 0
+                rot: 0,
+                acc: 0.1,
+                maxVel: 10,
+            }
+
+            this.move =
+            {
+                notRotating: true,
+                notAccelerating: true,
             }
         })
-    }
-
-    stop()
-    {
-        this.speed.vel = 0
-        this.speed.rot = 0
     }
 
     update()
@@ -50,12 +53,64 @@ class Boat
         {
             this.boat.rotation.y += this.speed.rot
             this.boat.translateX(this.speed.vel)
+            camera.position.x = Math.cos(Math.PI - boat.boat.rotation.y) * 100 + this.boat.position.x + 10
+            camera.position.z = Math.sin(Math.PI - boat.boat.rotation.y) * 100 + this.boat.position.z + 10
+            camera.position.y = boat.boat.position.y + 10
+            camera.lookAt(boat.boat.position)
+        }
+    }
+
+    updatePirate()
+    {
+        if (this.boat)
+        {
+            // distance between boat and pirate
+            let distance = Math.sqrt(Math.pow(this.boat.position.x - boat.boat.position.x, 2) + Math.pow(this.boat.position.z - boat.boat.position.z, 2))
+            // if distance is less than 100, then pirate is close to boat
+            if (distance < 100)
+            {
+                // if pirate is close to boat, then rotate boat towards boat
+                this.speed.rot = (Math.PI - this.boat.rotation.y) - boat.boat.rotation.y
+                this.speed.rot = this.speed.rot * 0.1
+                this.speed.rot = Math.min(this.speed.rot, 0.1)
+
+                this.boat.rotation.y += this.speed.rot
+            }
+            else
+            {
+                // Get random direction to move
+                let direction = Math.random()
+
+                // if pirate is far from boat, then accelerate boat
+                if (this.notAccelerating)
+                {
+                    this.speed.vel += this.speed.acc
+                    this.notAccelerating = false
+                }
+                else
+                {
+                    this.speed.vel += this.speed.acc
+                }
+            }
         }
     }
 }
 
-const boat = new Boat()
+const pirates = []
+const PIRATECOUNT = 10
 
+let boatModel = null
+async function createBoat()
+{
+    if(!boatModel)
+        boatModel = await loadModel("assets/boat/scene.gltf")
+    return new Boat(boatModel.clone())
+}
+
+const boat = await createBoat()
+
+for (let i = 0; i < PIRATECOUNT; i++)
+    pirates.push(await createBoat())
 
 class Treasure
 {
@@ -74,12 +129,12 @@ async function loadModel(url)
     return new Promise((resolve, reject) => { loader.load(url, (gltf) => { resolve(gltf.scene) }) })
 }
 
-let boatModel = null
+let treasureModel = null
 async function createTreasure()
 {
-    if(!boatModel)
-        boatModel = await loadModel("assets/treasure/scene.gltf")
-    return new Treasure(boatModel.clone())
+    if(!treasureModel)
+        treasureModel = await loadModel("assets/treasure/scene.gltf")
+    return new Treasure(treasureModel.clone())
 }
 
 let treasurees = []
@@ -184,29 +239,25 @@ async function init()
 
     window.addEventListener( 'keydown', function(e)
     {
-        console.log(e.key)
         if(e.key == "w" || e.key == "ArrowUp")
-            boat.speed.vel = 1
+            boat.speed.vel += boat.speed.acc, boat.notAccelerating = false
         if(e.key == "s" || e.key == "ArrowDown")
-            boat.speed.vel = -1
+            boat.speed.vel -= boat.speed.acc, boat.notAccelerating = false
         if(e.key == "d" || e.key == "ArrowLeft")
-            boat.speed.rot = -0.02
+            boat.speed.rot = -0.02, boat.notRotating = false
         if(e.key == "a" || e.key == "ArrowRight")
-            boat.speed.rot = 0.02
+            boat.speed.rot = 0.02, boat.notRotating = false
 
-        camera.position.add(boat.speed.val, 0, 0);
+        if (Math.abs(boat.speed.vel) > boat.speed.maxVel)
+            boat.speed.vel = boat.speed.maxVel * Math.sign(boat.speed.vel)
     })
 
     window.addEventListener( 'keyup', function(e)
     {
-        if(e.key == "w" || e.key == "s")
-            boat.speed.vel = 0
-        if(e.key == "d" || e.key == "a")
-            boat.speed.rot = 0
-        if(e.key == "ArrowUp" || e.key == "ArrowDown")
-            boat.speed.rot = 0
-        if(e.key == "ArrowLeft" || e.key == "ArrowRight")
-            boat.speed.rot = 0
+        if(e.key == "w" || e.key == "s" || e.key == "ArrowUp" || e.key == "ArrowDown")
+            boat.notAccelerating = true
+        if(e.key == "d" || e.key == "a" || e.key == "ArrowLeft" || e.key == "ArrowRight")
+            boat.notRotating = true
     })
 }
 
@@ -239,11 +290,26 @@ function checkCollisions()
     }
 }
 
+function changeSpeed()
+{
+    if (boat.boat)
+    {
+        if (boat.notAccelerating)
+            boat.speed.vel = Math.abs(boat.speed.vel) > boat.speed.acc * 3 ? boat.speed.vel - boat.speed.acc * 3 * Math.sign(boat.speed.vel) : 0
+
+        if (boat.notRotating)
+            boat.speed.rot = Math.abs(boat.speed.rot) > 0.002 ? boat.speed.rot - 0.002 * Math.sign(boat.speed.rot) : 0
+    }
+}
+
 function animate()
 {
     requestAnimationFrame( animate );
     render();
     boat.update()
+    changeSpeed()
+    for (let i = 0; i < PIRATECOUNT; ++i)
+        pirates[i].updatePirate()
     checkCollisions()
 }
 
